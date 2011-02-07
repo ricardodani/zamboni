@@ -2,7 +2,7 @@ import os
 from datetime import datetime, timedelta
 
 from django.db import connections, transaction
-from django.db.models import Q, F
+from django.db.models import Q, F, Max
 
 import commonware.log
 from celery.messaging import establish_connection
@@ -262,3 +262,13 @@ def hide_disabled_files():
                        (f.id, f.filename, f.file_path))
                 log.info(msg)
                 print msg
+
+
+@cronjobs.register
+def reindex():
+    from . import tasks
+    qs = Addon.objects.aggregate(max=Max('id'))
+    ids = range(1 + qs['max'])
+    with establish_connection() as cxn:
+        for chunk in chunked(ids, 300):
+            tasks.reindex.apply_async(args=chunk, connection=cxn)

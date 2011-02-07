@@ -5,12 +5,14 @@ import os
 import operator
 import random
 import time
+import unicodedata
 from datetime import datetime, timedelta
 
 from django.conf import settings
 from django.db import models, transaction
 from django.dispatch import receiver
 from django.db.models import Q, Max, signals as dbsignals
+from django.utils.encoding import smart_str
 from django.utils.translation import trans_real as translation
 
 import caching.base as caching
@@ -1298,3 +1300,85 @@ class BlacklistedSlug(amo.models.ModelBase):
     @classmethod
     def blocked(cls, slug):
         return slug.isdigit() or cls.objects.filter(name=slug).exists()
+
+
+def index(ids):
+    from django.db import connection
+    qq = len(connection.queries)
+    import time
+    start = time.time()
+    addons = Addon.objects.valid().filter(id__in=ids).by_id()
+
+    attrs = ('name', 'summary', 'description')
+    getter = operator.attrgetter(*['%s_id' % a for a in attrs])
+    ids = [x for addon in addons for x in getter(addon)]
+    qs = (Translation.objects.filter(id__in=ids)
+          .values_list('id', 'locale', 'localized_string'))
+    trans = {}
+    for id, locale, string in qs:
+        trans.setdefault(id, []).append((locale, string))
+
+    categories = {}
+    qs = (AddonCategory.objects.filter(addon__in=addons)
+          .values_list('addon', 'category', 'feature'))
+    for addon, xs in sorted_groupby(qs, lambda x: x[0]):
+        categories[addon] = [x[1:] for x in xs]
+
+    features = {}
+    qs = (Feature.objects.filter(addon__in=addons)
+          .values_list('addon', 'locale', 'application'))
+    for addon, xs in sorted_groupby(qs, lambda x: x[0]):
+        features[addon] = [x[1:] for x in xs]
+
+    print 'pre:  %.2f' % (time.time() - start)
+    rv = []
+    for addon in addons:
+      try:
+        doc = {}
+        rv.append(doc)
+        doc['table'] = 'addons'
+        doc['uuid'] = 'addons.%s' % addon.id
+
+        fs = ('id', 'type', 'status', 'weekly_downloads', 'bayesian_rating',
+              'last_updated', 'created')
+        for field in fs:
+            doc[field] = getattr(addon, field)
+
+        for name, id in zip(attrs, getter(addon)):
+            for locale, string in trans[id]:
+                if string:
+                    s = u''.join(c for c in string if unicodedata.category(c)[0] != 'C')
+                    doc['%s_%s' % (name, to_language(locale))] = s
+
+        cats = categories.get(addon.id, [])
+        doc['category'] = [r[0] for r in cats]
+        doc['creature_all'] = [r[0] for r in cats if r[1]]
+
+        feat = features.get(addon.id, [])
+        for locale, xs in itertools.groupby(feat, lambda x: x[0]):
+            key = 'feature_%s' % (to_language(locale) if locale else 'all')
+            doc[key] = [x[1] for x in xs]
+
+        apps = addon.compatible_apps
+        doc['apps'] = [a.id for a in apps]
+        if addon.type not in (amo.ADDON_SEARCH, amo.ADDON_PERSONA):
+            doc['min_appversions'] = [v.min_id for v in apps.values()]
+            doc['max_appversions'] = [v.max_id for v in apps.values()]
+
+        if addon._current_version_id:
+            doc['platforms'] = [f.platform_id for f in addon.current_version.all_files]
+
+        doc['tags'] = (addon.tags.not_blacklisted()
+                       .values_list('tag_text', flat=True))
+      except Exception, e:
+          print doc
+          raise
+    print doc
+    print 'for:  %.2f' % (time.time() - start)
+    print 'queries: %d' % (len(connection.queries) - qq)
+    import sunburnt
+    solr = sunburnt.SolrInterface('http://localhost:8983/solr', '/Users/jbalogh/dev/solr/conf/schema.xml')
+    solr.add(rv)
+    solr.commit()
+    t = (time.time() - start)
+    print 'solr: %.2f' % t

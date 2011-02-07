@@ -8,7 +8,7 @@ from celeryutils import task
 import amo
 from amo.decorators import write
 from . import cron  # Pull in tasks from cron.
-from .models import Addon, Preview
+from .models import Addon, Preview, index
 
 log = logging.getLogger('z.task')
 
@@ -70,3 +70,8 @@ def delete_preview_files(id, **kw):
             os.remove(f)
         except Exception, e:
             log.error('Error deleting preview file (%s): %s' % (f, e))
+
+
+@task
+def reindex(*ids, **kw):
+    index(ids)

@@ -159,6 +159,16 @@ class CommonMiddleware(common.CommonMiddleware):
             return super(CommonMiddleware, self).process_request(request)
 
 
+class SolrMiddleware(object):
+    use_solr = settings.USE_SOLR
+
+    def process_request(self, request):
+        if 'solr' in request.GET:
+            settings.USE_SOLR = int(request.GET.get('solr', 0))
+        else:
+            settings.USE_SOLR = self.use_solr
+
+
 class ReadOnlyMiddleware(object):
 
     def process_request(self, request):

@@ -270,5 +270,5 @@ def reindex():
     qs = Addon.objects.aggregate(max=Max('id'))
     ids = range(1 + qs['max'])
     with establish_connection() as cxn:
-        for chunk in chunked(ids, 300):
+        for chunk in chunked(ids, 500):
             tasks.reindex.apply_async(args=chunk, connection=cxn)

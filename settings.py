@@ -216,6 +216,7 @@ def JINJA_CONFIG():
 
 
 MIDDLEWARE_CLASSES = (
+    'amo.middleware.SolrMiddleware',
     # AMO URL middleware comes first so everyone else sees nice URLs.
     'amo.middleware.TimingMiddleware',
     'amo.middleware.LocaleAndAppURLMiddleware',
@@ -756,3 +757,7 @@ MOBILE_COOKIE = 'mamo'
 # If the users's Firefox has a version number greater than this we consider it
 # a beta.
 MIN_BETA_VERSION = '3.7'
+
+SOLR_URL = 'http://localhost:8983/solr/'
+SOLR_SCHEMA = '/Users/jbalogh/dev/solr/conf/schema.xml'
+USE_SOLR = True

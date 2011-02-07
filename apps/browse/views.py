@@ -1,6 +1,7 @@
 import collections
 
 from django import http
+from django.conf import settings
 from django.db.models import Q
 from django.http import HttpResponsePermanentRedirect
 from django.shortcuts import get_object_or_404
@@ -59,6 +60,18 @@ def addon_listing(request, addon_types, Filter=AddonFilter, default='popular'):
     # Set up the queryset and filtering for themes & extension listing pages.
     status = [amo.STATUS_PUBLIC, amo.STATUS_LITE,
               amo.STATUS_LITE_AND_NOMINATED]
+
+    if settings.USE_SOLR:
+        qs = Addon.objects.all()
+        filter = Filter(request, qs, 'sort', default)
+        # TODO: multiple types.
+        qs = Addon.objects.search().filter(apps=request.APP.id,
+                                           status=amo.STATUS_PUBLIC,
+                                           type=addon_types[0])
+        sorts = {'name': 'name', 'updated': '-last_updated',
+                 'created': '-created', 'popular': '-weekly_downloads',
+                 'rating': '-bayesian_rating'}
+        return qs.order_by(sorts[filter.field]), filter
 
     qs = (Addon.objects.listed(request.APP, *status)
           .filter(type__in=addon_types))
@@ -158,9 +171,12 @@ def extensions(request, category=None, template=None):
     addons, filter = addon_listing(request, [TYPE])
 
     if category:
-        addons = addons.filter(categories__id=category.id)
+        addons = addons.filter(categories=category.id)
 
-    count = addons.with_index(addons='type_status_inactive_idx').count()
+    if settings.USE_SOLR:
+        count = addons.solr.execute().total
+    else:
+        count = addons.with_index(addons='type_status_inactive_idx').count()
     addons = amo.utils.paginate(request, addons, count=count)
     return jingo.render(request, template,
                         {'category': category, 'addons': addons,

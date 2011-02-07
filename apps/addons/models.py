@@ -17,6 +17,7 @@ from django.utils.translation import trans_real as translation
 
 import caching.base as caching
 import commonware.log
+import sunburnt
 from tower import ugettext_lazy as _
 
 import amo.models
@@ -42,12 +43,46 @@ from . import query, signals
 log = commonware.log.getLogger('z.addons')
 
 
+class SolrQuerySet(object):
+
+    def __init__(self, solr):
+        assert solr is not None
+        self.solr = solr
+
+    def query(self, *a, **k):
+        return SolrQuerySet(self.solr.query(*a, **k))
+
+    def filter(self, *a, **k):
+        return SolrQuerySet(self.solr.filter(*a, **k))
+
+    def order_by(self, *a, **k):
+        return SolrQuerySet(self.solr.order_by(*a, **k))
+
+    def __getitem__(self, *a, **k):
+        return SolrQuerySet(self.solr.__getitem__(*a, **k))
+
+    def __iter__(self):
+        ids = [r['id'] for r in self.solr]
+        addons = dict((a.id, a)
+                      for a in Addon.objects.filter(id__in=ids).by_id())
+        for id in ids:
+            yield addons[id]
+
+    def __len__(self):
+        # TODO: not efficient.
+        return len(list(self.solr))
+
+
 class AddonManager(amo.models.ManagerBase):
 
     def get_query_set(self):
         qs = super(AddonManager, self).get_query_set()
         qs = qs._clone(klass=query.IndexQuerySet)
         return qs.transform(Addon.transformer)
+
+    def search(self, *args, **kw):
+        solr = sunburnt.SolrInterface(settings.SOLR_URL, settings.SOLR_SCHEMA)
+        return SolrQuerySet(solr.query(*args, **kw))
 
     def id_or_slug(self, val):
         if isinstance(val, basestring) and not val.isdigit():
@@ -1345,7 +1380,7 @@ def index(ids):
             doc[field] = getattr(addon, field)
 
         for name, id in zip(attrs, getter(addon)):
-            for locale, string in trans[id]:
+            for locale, string in trans.get(id, []):
                 if string:
                     s = u''.join(c for c in string if unicodedata.category(c)[0] != 'C')
                     doc['%s_%s' % (name, to_language(locale))] = s
@@ -1373,7 +1408,6 @@ def index(ids):
       except Exception, e:
           print doc
           raise
-    print doc
     print 'for:  %.2f' % (time.time() - start)
     print 'queries: %d' % (len(connection.queries) - qq)
     import sunburnt

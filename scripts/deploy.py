@@ -109,3 +109,4 @@ def update_amo(ctx):
     compress_assets('-u')
     deploy_code()
     # END: The normal update/push cycle.
+    # woohoo!
